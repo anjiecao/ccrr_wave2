@@ -1,0 +1,171 @@
+---
+title: "manylabs_miyamoto2002"
+author: "anjie"
+date: "4/22/2021"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(here)
+source(here("scripts/R_rainclouds.R"))
+
+d <- read_csv(here("data/manylab_miyamato_cleaned.csv"), 
+              col_types = cols(.default = "c")) %>% 
+  filter(Country == "China" | Country == "USA") %>% 
+  select(uID, variable1, variable2, miya1.4, miya1.7, miya2.4, miya2.7, Location, Country)
+```
+
+
+https://docs.google.com/spreadsheets/d/1DK2YrekUsfCFcgxyUnIy4-5oyunne8lk7i8CcsWWw9w/edit#gid=0
+
+- miya1.4=true attitude (pro-death condition; higher values=higher support for death penalty);
+- miya1.7=perceived constraint (pro-death condition; higher values=higher freedom); 
+- miya2.7=perceived constraint (against death condition; higher values= higher freedom). 
+- miya2.4=true attitude (against death penalty condition; higher values=higher support for death penalty);
+
+
+```{r}
+d <- d %>% 
+  rename(against_death_true = miya2.4, 
+         against_death_perceived = miya2.7, 
+         pro_death_true = miya1.4, 
+         pro_death_perceived = miya1.7)
+  
+# variable1 is just a duplicate of prodeath true
+d %>% 
+  filter(variable1 != pro_death_true)
+```
+
+rows that contain pro death true and pro death perceived 
+```{r}
+d %>% 
+  filter(!is.na(pro_death_true) & !is.na(pro_death_perceived)) %>% 
+  count()
+
+
+```
+ 
+rows that contain against death true and against death perceived 
+```{r}
+d %>% 
+  filter(!is.na(against_death_true) & !is.na(against_death_perceived)) %>% 
+  count()
+```
+
+yep, just to make sure they add up to each other. this makes sense! it's a between subject study! 
+```{r}
+d %>% 
+  count()
+```
+
+do we have equal representation from CN and US though? 
+against death penalty condition 
+```{r}
+d %>% 
+  filter(!is.na(against_death_true) & !is.na(against_death_perceived)) %>% 
+  group_by(Country) %>% 
+  count()
+```
+
+pro death penalty condition 
+```{r}
+d %>% 
+  filter(!is.na(pro_death_true) & !is.na(pro_death_perceived)) %>% 
+  group_by(Country) %>% 
+  count()
+```
+
+against death penalty condition 
+```{r}
+d %>% 
+  filter(!is.na(against_death_true) & !is.na(against_death_perceived)) %>% 
+  group_by(Country) %>% 
+  count()
+```
+
+ok this makes sense, just in general USA are more represented in the dataset 
+let's visualize the data a little bit 
+
+```{r}
+d <- d %>% 
+  # mutate(
+  #   condition = case_when(
+  #     !is.na(against_death_true) & !is.na(against_death_perceived) ~ "against_death_penalty", 
+  #     !is.na(pro_death_true) & !is.na(pro_death_perceived) ~ "pro_death_penalty"
+  #   )
+  # ) %>% 
+  pivot_longer(cols = pro_death_true:against_death_perceived, 
+               names_to = "condition_measure", 
+               values_to = "score", 
+               values_drop_na = TRUE) %>% 
+  mutate(
+    condition = case_when(
+      grepl("pro_death", condition_measure) ~ "Pro-Death Condition", 
+      grepl("against_death", condition_measure) ~ "Against Death Condition"
+    ), 
+    measure = case_when(
+      grepl("perceived", condition_measure) ~ "perceived", 
+      grepl("true", condition_measure) ~ "true"
+    ),
+    score = as.numeric(score)
+  )
+```
+
+
+- miya1.4=true attitude (pro-death condition; higher values=higher support for death penalty);
+- miya1.7=perceived constraint (pro-death condition; higher values=higher freedom); 
+- miya2.7=perceived constraint (against death condition; higher values= higher freedom). 
+- miya2.4=true attitude (against death penalty condition; higher values=higher support for death penalty);
+
+```{r}
+
+d %>% 
+  ggplot(aes(x = measure, y = as.numeric(score), fill = as.factor(Country), color = as.factor(Country))) + 
+  geom_point(position = position_jitterdodge(jitter.width = .5, jitter.height = .2,), alpha = .1) + 
+  #geom_violin() +  
+  facet_wrap(~condition) + 
+  theme_bw() + 
+  theme(legend.title = element_blank(), 
+        legend.position = "bottom") + 
+  geom_flat_violin(position = position_dodge(), alpha = .8) + 
+  ylab("score") + 
+  xlab("measure")
+
+```
+
+Original:
+
+> Controlling for perceived constraint, analyses compared perceived attitudes of the writer who wrote in favor of capital punishment and the writer who wrote against it (rating scale from 1, against capital punishment, to 15, supports capital punishment). American participants perceived a large difference between the actual attitude of the essay writer who had been assigned to write a pro-capital-punishment essay (M = 10.82, SD = 3.47) and the writer who had been assigned to write an anti-capital-punishment essay (M = 3.30, SD = 2.62), t(27) = 6.66, p < .001, d = 2.47, 95% CI = [1.46, 3.49]. Japanese participants perceived less of a difference in actual attitudes (M = 9.27, SD = 2.88, and M = 7.02, SD = 3.06, respectively), t(23) = 1.84, p = .069, d = 0.74, 95% CI = [–0.12, 1.59].
+
+Replication: 
+
+> participants perceived a difference in actual attitudes between the essay writer who had been assigned to write a pro-capital-punishment essay (M = 10.98, SD = 3.69) and the essay writer who had been assigned to write an anti-capital-punishment essay (M = 4.45, SD = 3.51), F(2, 7194) = 3,042.00, p < 2.2e−16, d = 1.82, 95% CI = [1.76, 1.87]
+
+so the differences they are looking for: 
+```{r}
+d %>% 
+  filter(measure == "true") %>% 
+  ggplot(aes(x = condition, y = as.numeric(score), fill = as.factor(Country), color = as.factor(Country))) + 
+  geom_point(position = position_jitterdodge(jitter.width = .5, jitter.height = .2,), alpha = .1) + 
+  #geom_violin() +  
+  facet_wrap(~Country) + 
+  theme_bw() + 
+  theme(legend.title = element_blank(), 
+        legend.position = "bottom") + 
+  geom_flat_violin(position = position_dodge(), alpha = .8) + 
+  ylab("score") + 
+  xlab("measure") + 
+  labs(title = "True attitude scores")
+```
+
+
+does not seem to differe across cultures
+
+
+
+
+
+
+
+
