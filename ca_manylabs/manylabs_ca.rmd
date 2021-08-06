@@ -1,0 +1,232 @@
+---
+title: "Reproducing Manylabs Results"
+author: "anjie & jiayi"
+date: "8/6/2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+
+```{r global options, include = FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+
+
+# Data Prepping 
+> Analysis Script1.Preparing SPSS Dataset for AnalysesSPSS syntax/* Open "ML2.Slate1.Random3rdDE.xlsx"in SPSS.
+
+
+## loading the data 
+```{r setup, include=FALSE}
+library(tidyverse)
+library(here)
+
+d <- read_csv(here("data_1.csv"))
+
+
+```
+
+
+> The following syntax prepares the dataset for the subsequent analyses.
+> RECODE miya1.1 (1=1)  INTO Condition.
+> RECODE miya2.1 (1=2) INTO Condition.
+
+```{r}
+d <- d %>% 
+  select(.id, ResponseID, Country, Language, Weird, starts_with("miya")) %>% 
+  mutate(
+    condition = case_when(
+      miya1.1 == 1 ~ "condition_1", 
+      miya2.1 == 1 ~ "condition_2"
+    )
+  ) 
+
+```
+>EXECUTE.DO 
+> IF  (Condition = 1).RECODE miya1.4 miya1.6 miya1.7 miya1.8 (ELSE=Copy) INTO TrueAttitude Average     Constraint Persuasive.END IF.
+> DO IF  (Condition = 2).RECODE miya2.4 miya2.6 miya2.7 miya2.8 (ELSE=Copy) INTO TrueAttitude Average     Constraint Persuasive. END IF.EXECUTE
+
+```{r}
+d_condition1 <- d %>% 
+  filter(condition == "condition_1") %>%
+  rename(
+    true_attitude = miya1.4, 
+    average = miya1.6, 
+    constraint = miya1.7, 
+    persuasive = miya1.8
+  )
+
+d_condition2 <- d %>% 
+  filter(condition == "condition_2") %>%
+  rename(
+    true_attitude = miya2.4, 
+    average = miya2.6, 
+    constraint = miya2.7, 
+    persuasive = miya2.8
+  )
+
+
+d_cleaned <- bind_rows(d_condition1, d_condition2) %>% 
+  select(.id, ResponseID, Country, Language, Weird, condition, true_attitude, average, constraint, persuasive)
+
+```
+
+```{r}
+d_cleaned 
+```
+
+# Check assumption {.tabset}
+
+Run a 2 (Country: US vs. Japan) ANOVA with the perceived persuasiveness as the DV to test if the perceived persuasiveness differs between US and Japan. 
+
+```{r}
+d_cleaned %>% 
+  filter(Country %in% c("USA", "Japan")) %>% 
+  ggplot(aes(x = Country, y = persuasive, color = Country)) + 
+  geom_jitter(alpha = .3, width = .3) + 
+  stat_summary(fun.data = "mean_cl_boot") + 
+  facet_wrap(~condition) + 
+  theme_classic()
+```
+
+```{r}
+d_cleaned %>% 
+  filter(Country %in% c("USA", "China")) %>% 
+  ggplot(aes(x = Country, y = persuasive, color = Country)) + 
+  geom_jitter(alpha = .3, width = .3) + 
+  stat_summary(fun.data = "mean_cl_boot") + 
+  facet_wrap(~condition) + 
+  theme_classic()
+```
+
+> We first confirmed that the essay used in Many Labs 2 was equally low in perceived persuasiveness in the two groups, F(1, 1661) = 0.008, p = .927 (a requirement to test the cross-cultural difference in correspondence bias)
+
+
+haha i don't know how to run anova in r but here's a tutorial: https://www.scribbr.com/statistics/anova-in-r/
+
+> USE 
+ALL.COMPUTE filter_$=(Country = 'USA' or country = 'Japan')
+ .VARIABLE LABELS filter_$ "Country = 'USA' or country = 'Japan'  (FILTER)".
+  VALUE LABELS filter_$ 0 'Not Selected' 1 'Selected'.
+  FORMATS filter_$ (f1.0).FILTER BY filter_$.EXECUTE.
+
+> UNIANOVA Persuasive BY Country  
+  METHOD=SSTYPE(3)  
+  INTERCEPT=INCLUDE  
+  PRINT=DESCRIPTIVE  
+  CRITERIA=ALPHA(.05)  /DESIGN=Country.
+
+
+## Japan
+
+```{r}
+us_japan_comparison_d <- d_cleaned %>% 
+  filter(Country %in% c("USA", "Japan")) 
+
+us_japan_comparison_d %>% 
+  group_by(Country) %>% 
+  summarise(n = n())
+
+aov(persuasive ~ Country, data = us_japan_comparison_d) %>% 
+  summary()
+```
+haha mission failed (success?) can't reproduce their results because the spreadsheet doesn't really contain the same number of participants (we also tried to load the data in slate2 but there's not even one single participant from japan there so lol)
+
+
+## China
+
+```{r}
+us_china_comparison_d <- d_cleaned %>% 
+  filter(Country %in% c("USA", "China"))
+
+us_china_comparison_d %>% 
+  ggplot(aes(x = Country, y = persuasive, color = Country)) + 
+  geom_jitter(alpha = .3, width = .3) + 
+  stat_summary(fun.data = "mean_cl_boot") + 
+  facet_wrap(~condition) + 
+  theme_classic()
+```
+> We first confirmed that the essay used in Many Labs 2 was equally low in perceived persuasiveness in the two groups, F(1, 1661) = 0.008, p = .927 (a requirement to test the cross-cultural difference in correspondence bias)
+
+Now let's see if US China meets the requirement here 
+
+```{r}
+aov(persuasive ~ Country, data = us_china_comparison_d) %>% 
+  summary()
+```
+
+so the assumption that CN and US participants' perceived persuasiveness of the articles was not met, but we are brave enough to move on from the violation of assumption. let's see what's the next test 
+
+# Actual correspondence bias test {.tabset}
+
+## Japan 
+
+>The following syntax tests cultural differences in the magnitude of CB.
+
+USE ALL.COMPUTE filter_$=(Country = 'USA' or country = 'Japan').
+VARIABLE LABELS filter_$ "Country = 'USA' or country = 'Japan'  (FILTER)".
+VALUE LABELS filter_$ 0 'Not Selected' 1 'Selected'.FORMATS filter_$ (f1.0).
+FILTER BY filter_$.EXECUTE.UNIANOVA TrueAttitude BY Condition Country WITH Constraint  
+METHOD=SSTYPE(3)  
+INTERCEPT=INCLUDE  
+PLOT=PROFILE(Condition*Country)  
+/EMMEANS=TABLES(Condition*Country) WITH(Constraint=MEAN)   
+/PRINT=DESCRIPTIVE  
+/CRITERIA=ALPHA(.05)  
+/DESIGN=Constraint Condition Country Condition*Country.
+
+> There was a significant Culture x Condition interaction on the judgement of true attitude, controlling for perceived constraint, F(1, 820) = 4.23, p = .04, d = 0.7
+
+
+```{r}
+us_japan_comparison_d %>% 
+  ggplot(aes(x = Country, y = true_attitude, color = condition)) + 
+  geom_jitter(alpha = .1, width = .3) + 
+  stat_summary(fun.data = "mean_cl_boot") + 
+  facet_wrap(~condition) + 
+  theme_classic()
+```
+
+
+```{r}
+aov(true_attitude ~ Country * condition + constraint, data = us_japan_comparison_d) %>% 
+  summary()
+
+```
+
+## China 
+
+
+can we see the same thing in China despite the violation of assumption? 
+```{r}
+us_china_comparison_d %>% 
+  ggplot(aes(x = Country, y = true_attitude, color = condition)) + 
+  geom_jitter(alpha = .1, width = .3) + 
+  stat_summary(fun.data = "mean_cl_boot") + 
+  facet_wrap(~condition) + 
+  theme_classic()
+```
+
+```{r}
+aov(true_attitude ~ Country * condition + constraint, data = us_china_comparison_d) %>% 
+  summary()
+```
+actually when controlling for persuasiveness it's still significant?
+```{r}
+aov(true_attitude ~ Country * condition + constraint + persuasive, data = us_china_comparison_d) %>% 
+  summary()
+```
+
+
+
+
+
+
+
+
+
+
