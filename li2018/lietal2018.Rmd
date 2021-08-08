@@ -1,0 +1,198 @@
+---
+title: "reproducing li et al 2018"
+author: "anjie"
+date: "8/6/2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+
+```{r global options, include = FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+library(tidyverse)
+library(here)
+library(lme4)
+
+d <- read_csv(here("raw_data.csv"))
+
+```
+
+# data prep 
+
+```{r}
+d_clean <- d %>% 
+  mutate(
+    age = case_when(
+      Age == -1 ~ "kid", 
+      Age == 1 ~ "adult",
+      TRUE ~ "NA"
+    ), 
+    culture = case_when(
+      Culture == -1 ~ "US", 
+      Culture == 1 ~ "CN",
+      TRUE ~ "NA"
+    )
+  ) %>% 
+  rename(
+    participant = Participant,
+    control_yes_greg = `Control statements`, 
+    control_yes_walter = X5,
+    control_yes_james = X6,
+    control_no_owen = X7, 
+    control_no_leo = X8, 
+    control_no_jason = X9, 
+    control_no_alvin = X10, 
+    control_no_blaze = X11,
+    test_peter = `Critical statements`, 
+    test_pickes = X13
+    
+  ) %>% 
+  select(participant, age, culture, starts_with("control"), starts_with("test")) %>% 
+  filter(!is.na(participant))
+
+d_clean
+```
+
+```{r}
+d_long <- d_clean %>% 
+  pivot_longer(cols = c(starts_with("control"), starts_with("test")), 
+               names_to = "response_type", 
+               values_to = "response") %>% 
+  mutate(
+    type = case_when(
+      grepl("control_yes", response_type) ~ "control_yes", 
+      grepl("control_no", response_type) ~ "control_no", 
+      grepl("test", response_type) ~ "test"
+    )
+  )
+
+d_long
+  
+```
+
+
+# reproducing raw percentage 
+
+## table1
+```{r}
+d_long %>% 
+  group_by(age, culture, type) %>% 
+  filter(grepl("control", response_type)) %>% 
+  summarise(
+    percentage_of_correct = mean(as.numeric(response), na.rm = TRUE)
+  )
+```
+yep everything was as reported 
+
+## model 
+
+
+>Controls.lmer = glmer (Correctness ∼ Culture * Age + (1|Participant) + (1|Statement), data = Controls, family = binomial)
+
+```{r}
+glmer(response ~ culture * age + (1|participant) + (1|response_type), 
+      data = filter(d_long, grepl("control", response_type)) %>% mutate(response = as.factor(response)), 
+      family = "binomial") %>% 
+  summary()
+```
+
+> To determine whether there were any cultural differences in the responses to the control statements, a binomial mixed-effects model was constructed using the R programming language, with culture, age and their interaction as fixed effects and participant and statement as random effects.3 We found a main effect of age (z = 6.274, p < 0.001) but no main effect of culture (z = 0.031, p > 0.1) and no interaction between age and culture (z = 1.697, p > 0.05). Separate analyses of the responses to Yes-controls and No-controls also found no reliable effects or interactions of culture (all p's > 0.1).  
+
+not so sure where the number comes from 
+
+
+# critical 
+
+## descriptive 
+```{r}
+d_critic_test <- d_long %>% 
+  group_by(age, culture, type) %>% 
+  filter(grepl("test", response_type)) %>% 
+  summarise(
+    percentage_of_correct = mean(as.numeric(response), na.rm = TRUE)
+  )
+```
+try the model 
+```{r}
+
+glmer(response ~ culture * age + (1|participant) + (1|response_type), 
+      data = filter(d_long, grepl("test", response_type)) %>% mutate(response = as.factor(response)), 
+      family = "binomial") %>% 
+  summary()
+
+```
+
+
+
+the table looks right, but is there item level difference? 
+
+```{r}
+critical_d <- d_long %>% 
+  group_by(age, culture, type) %>% 
+  filter(grepl("test", response_type)) %>% 
+  summarise(
+    percentage_of_correct = mean(as.numeric(response), na.rm = TRUE)
+  )
+
+
+d_long %>% 
+  group_by(age, culture, response_type) %>% 
+  filter(grepl("test", response_type)) %>% 
+  ggplot(aes(x = culture, y = as.numeric(response), color = response_type)) + 
+  stat_summary(fun.data = "mean_cl_boot", position = position_dodge(width = .2))+
+  geom_hline(data = critical_d %>% 
+               mutate(culture_print = case_when(
+                 culture == "CN" ~ "Reported Average for China", 
+                 culture == "US" ~ "Reported Average for US"
+               )), aes(x = culture, yintercept = percentage_of_correct,
+                                    color = culture_print)) +
+  
+  guides(legend = NULL) + 
+  facet_wrap(~age) + 
+  theme_classic() + 
+  ylab("Proportion of Causal-historical answer")
+  
+
+```
+maybe the reported CA is inflated...? idk or maybe there's just a statement that's worse. 
+
+another way to ask the question is: are these four groups of participants equally consistent? 
+```{r}
+d_long %>% 
+  group_by(age, culture, response_type) %>% 
+  filter(grepl("test", response_type)) %>% 
+  ungroup() %>% 
+  group_by(participant, age, culture) %>% 
+  summarise(
+    total_test_score = sum(as.numeric(response))
+  ) %>% 
+  mutate(
+    consistencty = case_when(
+      total_test_score == 2 ~ "consistent CH answer", 
+      total_test_score == 0 ~ "consistent D answer", 
+      total_test_score == 1 ~ "half and half"
+    )
+  ) %>% 
+  ungroup() %>% 
+  group_by(culture, age, consistencty) %>%
+  summarise(n_subject = n()) %>% 
+  ggplot(aes(x = consistencty, y = n_subject, fill = culture)) + 
+  geom_col(position = position_dodge()) + 
+  facet_grid( ~ age) + 
+  ylab("Number of subjects") + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = .9, hjust = 1)) + 
+  xlab("")
+
+
+```
+
+
+
+
+
+
+
